@@ -2,11 +2,31 @@ var express = require("express");
 var router = express.Router();
 
 let roleModel = require("../schemas/roles");
+let { authenticateToken, authorizeRoles } = require('../utils/authHandler')
 
+
+router.use(authenticateToken, authorizeRoles('admin'));
 
 router.get("/", async function (req, res, next) {
-    let roles = await roleModel.find({ isDeleted: false });
-    res.send(roles);
+    let page = Math.max(parseInt(req.query.page) || 1, 1);
+    let limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    let skip = (page - 1) * limit;
+
+    let filter = { isDeleted: false };
+    let [roles, total] = await Promise.all([
+        roleModel.find(filter).skip(skip).limit(limit),
+        roleModel.countDocuments(filter)
+    ]);
+
+    res.send({
+        data: roles,
+        pagination: {
+            page: page,
+            limit: limit,
+            total: total,
+            totalPages: Math.ceil(total / limit)
+        }
+    });
 });
 
 

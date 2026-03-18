@@ -3,19 +3,39 @@ var router = express.Router();
 let { validatedResult, CreateAnUserValidator, ModifyAnUserValidator } = require('../utils/validator')
 let userModel = require("../schemas/users");
 let userController = require('../controllers/users')
+let { authenticateToken, authorizeRoles, authorizeSelfOrRoles } = require('../utils/authHandler')
 
 
-router.get("/", async function (req, res, next) {
-  let users = await userModel
-    .find({ isDeleted: false })
-  res.send(users);
+router.get("/", authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
+  let page = Math.max(parseInt(req.query.page) || 1, 1);
+  let limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+  let skip = (page - 1) * limit;
+  let filter = { isDeleted: false };
+
+  if (req.query.username) {
+    filter.username = new RegExp(req.query.username, 'i');
+  }
+
+  let [users, total] = await Promise.all([
+    userModel.find(filter).skip(skip).limit(limit).populate('role', 'name'),
+    userModel.countDocuments(filter)
+  ]);
+
+  res.send({
+    data: users,
+    pagination: {
+      page: page,
+      limit: limit,
+      total: total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
 });
 
-router.get("/:id", async function (req, res, next) {
+router.get("/:id", authenticateToken, authorizeSelfOrRoles(function (req) { return req.params.id; }, 'admin'), async function (req, res, next) {
   try {
-    let result = await userModel
-      .find({ _id: req.params.id, isDeleted: false })
-    if (result.length > 0) {
+    let result = await userModel.findOne({ _id: req.params.id, isDeleted: false }).populate('role', 'name')
+    if (result) {
       res.send(result);
     }
     else {
@@ -26,7 +46,7 @@ router.get("/:id", async function (req, res, next) {
   }
 });
 
-router.post("/", CreateAnUserValidator, validatedResult, async function (req, res, next) {
+router.post("/", authenticateToken, authorizeRoles('admin'), CreateAnUserValidator, validatedResult, async function (req, res, next) {
   try {
     let newItem = await userController.CreateAnUser(
       req.body.username, req.body.password, req.body.email, req.body.role,
@@ -37,7 +57,7 @@ router.post("/", CreateAnUserValidator, validatedResult, async function (req, re
   }
 });
 
-router.put("/:id", ModifyAnUserValidator, validatedResult, async function (req, res, next) {
+router.put("/:id", authenticateToken, authorizeRoles('admin'), ModifyAnUserValidator, validatedResult, async function (req, res, next) {
   try {
     let id = req.params.id;
     let updatedItem = await userModel.findByIdAndUpdate(id, req.body, { new: true });
@@ -52,7 +72,7 @@ router.put("/:id", ModifyAnUserValidator, validatedResult, async function (req, 
   }
 });
 
-router.delete("/:id", async function (req, res, next) {
+router.delete("/:id", authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   try {
     let id = req.params.id;
     let updatedItem = await userModel.findByIdAndUpdate(

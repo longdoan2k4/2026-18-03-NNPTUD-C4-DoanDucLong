@@ -2,28 +2,44 @@ var express = require('express');
 var router = express.Router();
 const slugify = require('slugify');
 let productModel = require('../schemas/products')
+let { authenticateToken, authorizeRoles } = require('../utils/authHandler')
 
 /* GET users listing. */
 router.get('/', async function (req, res, next) {
   let queries = req.query;
-  let titleQ = queries.titl ? queries.title : "";
-  let minPrice = queries.min ? queries.min : 0;
-  let maxPrice = queries.max ? queries.max : 10000;
-  console.log(queries);
-  let result = await productModel.find(
-    {
-      isDeleted: false,
-      title: new RegExp(titleQ, 'i'),
-      price: {
-        $gte: minPrice,
-        $lte: maxPrice
-      }
+  let titleQ = queries.title ? queries.title : "";
+  let minPrice = Number(queries.min || 0);
+  let maxPrice = Number(queries.max || 1000000000);
+  let page = Math.max(parseInt(queries.page) || 1, 1);
+  let limit = Math.min(Math.max(parseInt(queries.limit) || 10, 1), 100);
+  let skip = (page - 1) * limit;
+
+  let filter = {
+    isDeleted: false,
+    title: new RegExp(titleQ, 'i'),
+    price: {
+      $gte: minPrice,
+      $lte: maxPrice
     }
-  ).populate({
-    path: 'category',
-    select: "name"
-  })
-  res.send(result);
+  };
+
+  let [result, total] = await Promise.all([
+    productModel.find(filter).skip(skip).limit(limit).populate({
+      path: 'category',
+      select: "name"
+    }),
+    productModel.countDocuments(filter)
+  ]);
+
+  res.send({
+    data: result,
+    pagination: {
+      page: page,
+      limit: limit,
+      total: total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
 });
 ///api/v1/products/id
 router.get('/:id', async function (req, res, next) {
@@ -43,7 +59,7 @@ router.get('/:id', async function (req, res, next) {
     });
   }
 });
-router.post('/', async function (req, res, next) {
+router.post('/', authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   let newProduct = new productModel({
     title: req.body.title,
     slug: slugify(req.body.title, {
@@ -59,7 +75,7 @@ router.post('/', async function (req, res, next) {
   await newProduct.save();
   res.send(newProduct)
 })
-router.put('/:id', async function (req, res, next) {
+router.put('/:id', authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   //cach 1
   // try {
   //   let id = req.params.id;
@@ -93,7 +109,7 @@ router.put('/:id', async function (req, res, next) {
     res.status(404).send(error)
   }
 })
-router.delete('/:id', async function (req, res, next) {
+router.delete('/:id', authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   try {
     let id = req.params.id;
     let result = await productModel.findById(id);

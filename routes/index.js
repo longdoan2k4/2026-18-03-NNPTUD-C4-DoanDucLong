@@ -3,7 +3,9 @@ var router = express.Router();
 
 /* GET home page. */
 router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Express' });
+  res.send({
+    message: 'NNPTUD-C4 API is running'
+  });
 });
 
 module.exports = router;

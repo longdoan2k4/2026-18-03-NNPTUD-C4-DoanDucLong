@@ -2,15 +2,37 @@ var express = require('express');
 var router = express.Router();
 const slugify = require('slugify');
 let categoryModel = require('../schemas/categories')
+let productModel = require('../schemas/products')
+let { authenticateToken, authorizeRoles } = require('../utils/authHandler')
 
 /* GET users listing. */
 router.get('/', async function (req, res, next) {
-  let dataCategories = await categoryModel.find(
-    {
-      isDeleted: false
+  let page = Math.max(parseInt(req.query.page) || 1, 1);
+  let limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+  let skip = (page - 1) * limit;
+
+  let filter = {
+    isDeleted: false
+  };
+
+  if (req.query.name) {
+    filter.name = new RegExp(req.query.name, 'i');
+  }
+
+  let [dataCategories, total] = await Promise.all([
+    categoryModel.find(filter).skip(skip).limit(limit),
+    categoryModel.countDocuments(filter)
+  ]);
+
+  res.send({
+    data: dataCategories,
+    pagination: {
+      page: page,
+      limit: limit,
+      total: total,
+      totalPages: Math.ceil(total / limit)
     }
-  )
-  res.send(dataCategories);
+  });
 });
 ///api/v1/products/id
 router.get('/:id', async function (req, res, next) {
@@ -30,27 +52,30 @@ router.get('/:id', async function (req, res, next) {
     });
   }
 });
-router.get('/:id/products', function (req, res, next) {
-  let id = req.params.id;
-  let result = dataCategories.filter(
-    function (e) {
-      return e.id == id && !e.isDeleted
+router.get('/:id/products', async function (req, res, next) {
+  try {
+    let id = req.params.id;
+    let category = await categoryModel.findById(id);
+
+    if (!category || category.isDeleted) {
+      return res.status(404).send({
+        message: "ID NOT FOUND"
+      });
     }
-  )
-  if (result.length) {
-    result = dataProducts.filter(
-      function (e) {
-        return e.category.id == id && !e.isDeleted
-      }
-    )
-    res.send(result)
-  } else {
-    res.status(404).send({
+
+    let products = await productModel.find({
+      category: id,
+      isDeleted: false
+    }).populate('category', 'name');
+
+    return res.send(products)
+  } catch (error) {
+    return res.status(404).send({
       message: "ID NOT FOUND"
     });
   }
 });
-router.post('/', async function (req, res, next) {
+router.post('/', authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   let newCate = new categoryModel({
     name: req.body.name,
     slug: slugify(req.body.name, {
@@ -63,7 +88,7 @@ router.post('/', async function (req, res, next) {
   await newCate.save();
   res.send(newCate)
 })
-router.put('/:id', async function (req, res, next) {
+router.put('/:id', authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   //cach 1
   // try {
   //   let id = req.params.id;
@@ -97,7 +122,7 @@ router.put('/:id', async function (req, res, next) {
     res.status(404).send(error)
   }
 })
-router.delete('/:id', async function (req, res, next) {
+router.delete('/:id', authenticateToken, authorizeRoles('admin'), async function (req, res, next) {
   try {
     let id = req.params.id;
     let result = await categoryModel.findById(id);
